@@ -8,30 +8,52 @@ export default async function handler(req,res){
     if(!message)
       return res.status(400).json({error:"Message kosong"});
 
-    const text=message.toLowerCase();
-    let reply="Aku masih dalam mode gratis. Untuk saat ini aku belum terhubung ke AI eksternal.";
+    const response=await fetch(
+      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      {
+        method:"POST",
+        headers:{
+          "Content-Type":"application/json",
+          "x-goog-api-key":process.env.GEMINI_API_KEY
+        },
+        body:JSON.stringify({
+          system_instruction:{
+            parts:[{
+              text:"Kamu adalah NEX AI, personal AI assistant yang ramah, pintar, membantu, dan menjawab dalam bahasa yang digunakan pengguna."
+            }]
+          },
+          contents:[
+            {
+              role:"user",
+              parts:[
+                {text:message}
+              ]
+            }
+          ]
+        })
+      }
+    );
 
-    if(text.includes("halo")||text.includes("hai")||text.includes("hello"))
-      reply="Halo! 👋 Aku NEX AI. Ada yang ingin kamu kerjakan?";
+    const data=await response.json();
 
-    else if(text.includes("nama"))
-      reply="Namaku NEX AI, personal assistant yang sedang kamu bangun.";
+    if(!response.ok){
+      return res.status(response.status).json({
+        error:data.error?.message||"Gemini API gagal"
+      });
+    }
 
-    else if(text.includes("project")||text.includes("proyek"))
-      reply="Kita bisa membuat banyak project seperti aplikasi kasir, portfolio, notes, task manager, atau tools Android berbasis HTML, CSS, dan JavaScript.";
+    const reply=
+      data.candidates?.[0]?.content?.parts?.[0]?.text;
 
-    else if(text.includes("coding")||text.includes("kode"))
-      reply="Siap membantu coding. Kirim kode atau jelaskan fitur yang ingin kamu buat.";
-
-    else if(text.includes("terima kasih")||text.includes("makasih"))
-      reply="Sama-sama! 😎";
-
-    else if(text.includes("siapa kamu"))
-      reply="Aku NEX AI — assistant yang sedang kamu bangun sendiri.";
+    if(!reply){
+      return res.status(500).json({
+        error:"Gemini tidak memberikan jawaban."
+      });
+    }
 
     return res.status(200).json({
       reply,
-      mode:"free"
+      mode:"gemini"
     });
 
   }catch(error){
