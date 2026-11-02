@@ -9,7 +9,7 @@ export default async function handler(req,res){
       return res.status(400).json({error:"Message kosong"});
 
     const response=await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent",
+      "https://generativelanguage.googleapis.com/v1beta/interactions",
       {
         method:"POST",
         headers:{
@@ -17,19 +17,10 @@ export default async function handler(req,res){
           "x-goog-api-key":process.env.GEMINI_API_KEY
         },
         body:JSON.stringify({
-          system_instruction:{
-            parts:[{
-              text:"Kamu adalah NEX AI, personal AI assistant yang ramah, pintar, membantu, dan menjawab dalam bahasa yang digunakan pengguna."
-            }]
-          },
-          contents:[
-            {
-              role:"user",
-              parts:[
-                {text:message}
-              ]
-            }
-          ]
+          model:"gemini-3.8-flash",
+          input:message,
+          system_instruction:
+            "Kamu adalah NEX AI, personal AI assistant yang ramah, pintar, membantu, dan menjawab dalam bahasa yang digunakan pengguna."
         })
       }
     );
@@ -43,7 +34,9 @@ export default async function handler(req,res){
     }
 
     const reply=
-      data.candidates?.[0]?.content?.parts?.[0]?.text;
+      data.outputs?.find(x=>x.type==="text")?.text ||
+      data.output?.text ||
+      data.text;
 
     if(!reply){
       return res.status(500).json({
