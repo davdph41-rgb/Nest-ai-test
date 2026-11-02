@@ -18,9 +18,7 @@ export default async function handler(req,res){
         },
         body:JSON.stringify({
           model:"gemini-3.8-flash",
-          input:message,
-          system_instruction:
-            "Kamu adalah NEX AI, personal AI assistant yang ramah, pintar, membantu, dan menjawab dalam bahasa yang digunakan pengguna."
+          input:message
         })
       }
     );
@@ -28,19 +26,27 @@ export default async function handler(req,res){
     const data=await response.json();
 
     if(!response.ok){
+      console.error("Gemini error:",data);
+
       return res.status(response.status).json({
         error:data.error?.message||"Gemini API gagal"
       });
     }
 
-    const reply=
-      data.outputs?.find(x=>x.type==="text")?.text ||
-      data.output?.text ||
-      data.text;
+    const steps=data.steps||[];
+
+    const textStep=steps
+      .slice()
+      .reverse()
+      .find(step=>step.type==="model_output");
+
+    const reply=textStep?.content
+      ?.find(item=>item.type==="text")
+      ?.text;
 
     if(!reply){
       return res.status(500).json({
-        error:"Gemini tidak memberikan jawaban."
+        error:"Gemini belum memberikan jawaban."
       });
     }
 
@@ -50,7 +56,7 @@ export default async function handler(req,res){
     });
 
   }catch(error){
-    console.error(error);
+    console.error("Server error:",error);
 
     return res.status(500).json({
       error:"Server error"
