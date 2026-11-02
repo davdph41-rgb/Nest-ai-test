@@ -9,7 +9,7 @@ export default async function handler(req,res){
       return res.status(400).json({error:"Message kosong"});
 
     const response=await fetch(
-      "https://generativelanguage.googleapis.com/v1beta/interactions",
+      "https://generativelanguage.googleapis.com/v1/interactions",
       {
         method:"POST",
         headers:{
@@ -18,17 +18,14 @@ export default async function handler(req,res){
         },
         body:JSON.stringify({
           model:"gemini-3.8-flash",
-          input:message,
-          generation_config:{
-            thinking_level:"low"
-          }
+          input:message
         })
       }
     );
 
     const data=await response.json();
 
-    console.log("Gemini response:",JSON.stringify(data));
+    console.log("GEMINI:",JSON.stringify(data));
 
     if(!response.ok){
       return res.status(response.status).json({
@@ -40,17 +37,17 @@ export default async function handler(req,res){
 
     if(!reply){
       return res.status(500).json({
-        error:"Gemini tidak menghasilkan teks."
+        error:"Gemini tidak memberikan jawaban."
       });
     }
 
     return res.status(200).json({
-      reply:reply,
+      reply,
       mode:"gemini"
     });
 
   }catch(error){
-    console.error("SERVER ERROR:",error);
+    console.error(error);
 
     return res.status(500).json({
       error:error.message||"Server error"
