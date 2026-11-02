@@ -8,32 +8,36 @@ export default async function handler(req,res){
     if(!message)
       return res.status(400).json({error:"Message kosong"});
 
-    const response=await fetch("https://api.openai.com/v1/responses",{
-      method:"POST",
-      headers:{
-        "Content-Type":"application/json",
-        "Authorization":`Bearer ${process.env.OPENAI_API_KEY}`
-      },
-      body:JSON.stringify({
-        model:"gpt-5.6",
-        instructions:"Kamu adalah NEX AI, personal AI assistant yang ramah, ringkas, dan membantu.",
-        input:message
-      })
-    });
+    const text=message.toLowerCase();
+    let reply="Aku masih dalam mode gratis. Untuk saat ini aku belum terhubung ke AI eksternal.";
 
-    const data=await response.json();
+    if(text.includes("halo")||text.includes("hai")||text.includes("hello"))
+      reply="Halo! 👋 Aku NEX AI. Ada yang ingin kamu kerjakan?";
 
-    if(!response.ok)
-      return res.status(response.status).json({
-        error:data.error?.message||"AI request gagal"
-      });
+    else if(text.includes("nama"))
+      reply="Namaku NEX AI, personal assistant yang sedang kamu bangun.";
 
-    res.status(200).json({
-      reply:data.output_text
+    else if(text.includes("project")||text.includes("proyek"))
+      reply="Kita bisa membuat banyak project seperti aplikasi kasir, portfolio, notes, task manager, atau tools Android berbasis HTML, CSS, dan JavaScript.";
+
+    else if(text.includes("coding")||text.includes("kode"))
+      reply="Siap membantu coding. Kirim kode atau jelaskan fitur yang ingin kamu buat.";
+
+    else if(text.includes("terima kasih")||text.includes("makasih"))
+      reply="Sama-sama! 😎";
+
+    else if(text.includes("siapa kamu"))
+      reply="Aku NEX AI — assistant yang sedang kamu bangun sendiri.";
+
+    return res.status(200).json({
+      reply,
+      mode:"free"
     });
 
   }catch(error){
-    res.status(500).json({
+    console.error(error);
+
+    return res.status(500).json({
       error:"Server error"
     });
   }
