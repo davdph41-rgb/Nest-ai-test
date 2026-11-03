@@ -1,42 +1,37 @@
-import {GoogleGenAI} from "@google/genai";
-
-export default async function handler(req,res){
-  if(req.method!=="POST"){
-    return res.status(405).json({error:"Method not allowed"});
-  }
-
-  try{
-    const {message}=req.body;
-
-    if(!message){
-      return res.status(400).json({error:"Message kosong"});
+export default async function handler(req, res) {
+    if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Method not allowed' });
     }
 
-    if(!process.env.GEMINI_API_KEY){
-      return res.status(500).json({
-        error:"GEMINI_API_KEY belum tersedia di Vercel"
-      });
+    const { message } = req.body;
+    const apiKey = process.env.GEMINI_API_KEY;
+
+    if (!apiKey) {
+        return res.status(500).json({ error: 'API Key belum diset di server Vercel.' });
     }
 
-    const ai=new GoogleGenAI({
-      apiKey:process.env.GEMINI_API_KEY
-    });
+    try {
+        const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+                contents: [{ parts: [{ text: message }] }]
+            })
+        });
 
-    const response=await ai.models.generateContent({
-      model:"gemini-3.8-flash",
-      contents:message
-    });
+        const data = await apiResponse.json();
 
-    return res.status(200).json({
-      reply:response.text,
-      mode:"gemini"
-    });
+        if (data.error) {
+            return res.status(500).json({ error: `Gemini Error: ${data.error.message}` });
+        }
 
-  }catch(error){
-    console.error("GEMINI ERROR:",error);
-
-    return res.status(500).json({
-      error:error.message||"Gemini API gagal"
-    });
-  }
+        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
+            const aiReply = data.candidates[0].content.parts[0].text;
+            return res.status(200).json({ reply: aiReply });
+        } else {
+            return res.status(500).json({ error: 'Struktur respons API tidak dikenali.' });
+        }
+    } catch (error) {
+        return res.status(500).json({ error: `Server Error: ${error.message}` });
+    }
 }
