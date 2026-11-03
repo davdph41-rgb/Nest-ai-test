@@ -1,47 +1,80 @@
 <!DOCTYPE html>
 <html lang="id">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>NEX AI</title>
-<link rel="stylesheet" href="style.css">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat Gemini Secure</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: sans-serif; }
+        body { background: #121212; color: #e0e0e0; display: flex; flex-direction: column; height: 100vh; }
+        header { background: #1f1f1f; padding: 15px; text-align: center; font-size: 1.1rem; font-weight: bold; border-bottom: 1px solid #333; }
+        #chat-container { flex: 1; overflow-y: auto; padding: 15px; display: flex; flex-direction: column; gap: 10px; }
+        .message { max-width: 80%; padding: 10px 14px; border-radius: 12px; line-height: 1.4; word-wrap: break-word; font-size: 0.95rem; }
+        .user { background: #007bff; color: white; align-self: flex-end; border-bottom-right-radius: 2px; }
+        .ai { background: #2d2d2d; color: #e0e0e0; align-self: flex-start; border-bottom-left-radius: 2px; border: 1px solid #444; }
+        #input-container { display: flex; padding: 10px; background: #1f1f1f; border-top: 1px solid #333; gap: 8px; }
+        input { flex: 1; padding: 10px 14px; border-radius: 20px; border: 1px solid #444; background: #2a2a2a; color: white; outline: none; font-size: 0.95rem; }
+        button { background: #007bff; color: white; border: none; padding: 0 16px; border-radius: 20px; font-weight: bold; cursor: pointer; }
+        button:active { background: #0056b3; }
+    </style>
 </head>
 <body>
 
-<div class="app">
+    <header>Gemini AI Chat (Secure)</header>
 
-<header>
-  <div class="brand">
-    <div class="logo">N</div>
-    <div>
-      <h1>NEX AI</h1>
-      <span>Personal Assistant</span>
+    <div id="chat-container">
+        <div class="message ai">Halo! Ada yang bisa aku bantu hari ini?</div>
     </div>
-  </div>
-  <button id="clearBtn">＋</button>
-</header>
 
-<main id="chat">
-  <div class="welcome">
-    <div class="big-logo">N</div>
-    <h2>How can I help?</h2>
-    <p>Ask me anything.</p>
-
-    <div class="suggestions">
-      <button>💡 Beri aku ide project</button>
-      <button>📝 Buatkan task untuk hari ini</button>
-      <button>💻 Bantu aku coding</button>
+    <div id="input-container">
+        <input type="text" id="user-input" placeholder="Ketik pesan..." onkeypress="handleKeyPress(event)">
+        <button onclick="sendMessage()">Kirim</button>
     </div>
-  </div>
-</main>
 
-<form id="chatForm">
-  <textarea id="message" placeholder="Message NEX AI..." rows="1"></textarea>
-  <button id="sendBtn" type="submit">↑</button>
-</form>
+    <script>
+        async function sendMessage() {
+            const inputField = document.getElementById("user-input");
+            const chatContainer = document.getElementById("chat-container");
+            const userText = inputField.value.trim();
 
-</div>
+            if (!userText) return;
 
-<script src="script.js"></script>
+            chatContainer.innerHTML += `<div class="message user">${userText}</div>`;
+            inputField.value = "";
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            const loadingId = "loading-" + Date.now();
+            chatContainer.innerHTML += `<div id="${loadingId}" class="message ai">Mengetik...</div>`;
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            try {
+                // Mengirim ke backend serverless function di /api/chat
+                const response = await fetch('/api/chat', {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ message: userText })
+                });
+
+                const data = await response.json();
+                document.getElementById(loadingId).remove();
+
+                if (data.reply) {
+                    chatContainer.innerHTML += `<div class="message ai">${data.reply}</div>`;
+                } else {
+                    chatContainer.innerHTML += `<div class="message ai">${data.error || 'Terjadi kesalahan.'}</div>`;
+                }
+            } catch (error) {
+                document.getElementById(loadingId).remove();
+                chatContainer.innerHTML += `<div class="message ai">Gagal terhubung ke server.</div>`;
+            }
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+        }
+
+        function handleKeyPress(event) {
+            if (event.key === "Enter") {
+                sendMessage();
+            }
+        }
+    </script>
 </body>
 </html>
