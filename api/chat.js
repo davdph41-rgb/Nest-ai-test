@@ -1,38 +1,32 @@
-export default async function handler(req, res) {
-    if (req.method !== 'POST') {
-        return res.status(405).json({ error: 'Method not allowed' });
-    }
+module.exports = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).end();
 
-    const { message } = req.body;
-    const apiKey = process.env.GEMINI_API_KEY;
+  const { messages, password } = req.body || {};
+  if (password !== process.env.APP_PASSWORD) {
+    return res.status(401).json({ text: "Password salah" });
+  }
 
-    if (!apiKey) {
-        return res.status(500).json({ error: 'API Key belum diset di server Vercel.' });
-    }
+  const contents = (messages || []).map((m) => ({
+    role: m.role === "user" ? "user" : "model",
+    parts: [{ text: m.text }],
+  }));
 
-    try {
-        // Menggunakan model gemini-3.8-flash sesuai rekomendasi resmi dari error
-        const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-                contents: [{ parts: [{ text: message }] }]
-            })
-        });
-
-        const data = await apiResponse.json();
-
-        if (data.error) {
-            return res.status(500).json({ error: `Gemini Error: ${data.error.message}` });
-        }
-
-        if (data.candidates && data.candidates.length > 0 && data.candidates[0].content) {
-            const aiReply = data.candidates[0].content.parts[0].text;
-            return res.status(200).json({ reply: aiReply });
-        } else {
-            return res.status(500).json({ error: 'Struktur respons API tidak dikenali.' });
-        }
-    } catch (error) {
-        return res.status(500).json({ error: `Server Error: ${error.message}` });
-    }
-}
+  try {
+    const r = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ contents }),
+      }
+    );
+    const data = await r.json();
+    const text =
+      data?.candidates?.[0]?.content?.parts?.[0]?.text ||
+      data?.error?.message ||
+      "Tidak ada jawaban";
+    res.json({ text });
+  } catch (e) {
+    res.status(500).json({ text: "Server error: " + e.message });
+  }
+};
