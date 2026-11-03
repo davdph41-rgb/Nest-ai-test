@@ -11,7 +11,7 @@ export default async function handler(req, res) {
     }
 
     try {
-        // Menggunakan model gemini-3.8-flash sesuai rekomendasi error sistem
+        // Menggunakan model gemini-3.8-flash sesuai rekomendasi resmi dari error
         const apiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3.8-flash:generateContent?key=${apiKey}`, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
