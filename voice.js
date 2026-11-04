@@ -26,8 +26,9 @@
 
   /* ---------- Tampilan ---------- */
   const css = `
-  :root{--vx-bg:#ffffff;--vx-fg:#111827;--vx-card:#f3f4f6;--vx-line:#e5e7eb;--vx-acc:#4f46e5}
-  @media (prefers-color-scheme:dark){:root{--vx-bg:#0f172a;--vx-fg:#e5e7eb;--vx-card:#1e293b;--vx-line:#334155}}
+  :root{--vx-bg:#ffffff;--vx-fg:#111827;--vx-card:#f3f4f6;--vx-line:#e5e7eb;--vx-acc:#2563eb}
+  @media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--vx-bg:#0f172a;--vx-fg:#e5e7eb;--vx-card:#1e293b;--vx-line:#334155}}
+  :root[data-theme="dark"]{--vx-bg:#0f172a;--vx-fg:#e5e7eb;--vx-card:#1e293b;--vx-line:#334155}
   .vx-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;font-size:26px;cursor:grab;background:var(--vx-acc);color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:99998;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;animation:vx-float 3s ease-in-out infinite}
   .vx-fab.vx-drag{animation:none;cursor:grabbing;transform:scale(1.15);box-shadow:0 10px 26px rgba(0,0,0,.5)}
   @keyframes vx-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
@@ -78,7 +79,7 @@
     '<details class="vx-set"><summary>⚙️ Pengaturan suara</summary>' +
     '<label>Suara<select id="vx-suara"></select></label>' +
     '<label>Kecepatan bicara: <span id="vx-rv"></span><input type="range" id="vx-rate" min="0.7" max="1.4" step="0.1"></label>' +
-    '<div class="vx-btns"><button id="vx-tes">🔈 Tes suara</button><button id="vx-hapus">🗑️ Hapus riwayat</button></div>' +
+    '<div class="vx-btns"><button id="vx-tes">🔈 Tes suara</button><button id="vx-hapus">🗑️ Hapus riwayat chat</button></div>' +
     '</details>';
   document.body.appendChild(panel);
 
@@ -105,15 +106,29 @@
     logEl.scrollTop = logEl.scrollHeight;
   }
 
-  function simpanRiwayat(role, text) {
-    S.riwayat.push({ role, text });
-    if (S.riwayat.length > 40) S.riwayat = S.riwayat.slice(-40);
-    simpanLS('vx_riwayat', S.riwayat);
-    // Kabar untuk script lain (mis. chat utama): document.addEventListener('voice-message', ...)
+  const jembatan = () => window.chatBridge || null;
+
+  function ambilRiwayat() {
+    const j = jembatan();
+    return j ? j.getMessages() : S.riwayat;
+  }
+
+  function simpanPesan(role, text) {
+    const j = jembatan();
+    if (j) {
+      j.addMessage(role, text);   // muncul di chat utama dan tersimpan di sana
+    } else {
+      S.riwayat.push({ role, text });
+      if (S.riwayat.length > 40) S.riwayat = S.riwayat.slice(-40);
+      simpanLS('vx_riwayat', S.riwayat);
+    }
     document.dispatchEvent(new CustomEvent('voice-message', { detail: { role, text } }));
   }
 
-  S.riwayat.forEach((m) => tambahBubble(m.role === 'user' ? 'user' : 'ai', m.text));
+  function tampilkanRiwayat() {
+    logEl.innerHTML = '';
+    ambilRiwayat().slice(-30).forEach((m) => tambahBubble(m.role === 'user' ? 'user' : 'ai', m.text));
+  }
 
   /* ---------- Status & animasi gelombang ---------- */
   const LABEL = {
@@ -206,16 +221,26 @@
   }
 
   /* ---------- Kirim ke api/chat.js ---------- */
-  async function tanyaAI(teks) {
-    let password = localStorage.getItem('app_password');
-    if (!password) {
-      password = prompt('Masukkan password:');
-      if (!password) throw new Error('Password dibatalkan');
-      localStorage.setItem('app_password', password);
+  function ambilPassword() {
+    const el = document.getElementById('password');   // kolom password di halaman chat
+    let p = (el && el.value) || localStorage.getItem('chat_password') || '';
+    if (!p) {
+      p = prompt('Masukkan password:');
+      if (!p) throw new Error('Password dibatalkan');
+      try { localStorage.setItem('chat_password', p); } catch (e) {}
+      if (el) el.value = p;
     }
+    return p;
+  }
+
+  async function tanyaAI(teks) {
+    const password = ambilPassword();
 
     const petunjuk = '[Jawab dalam 1-3 kalimat, bahasa Indonesia santai, tanpa format markdown.] ';
-    const konteks = S.riwayat.slice(-20).map((m) => ({ role: m.role, text: m.text }));
+    const konteks = ambilRiwayat().slice(-30).map((m) => ({
+      role: m.role === 'user' ? 'user' : 'ai',
+      text: m.text,
+    }));
     while (konteks.length && konteks[0].role !== 'user') konteks.shift();
 
     const res = await fetch('/api/chat', {
@@ -231,14 +256,16 @@
     try { data = await res.json(); } catch (e) {}
 
     if (res.status === 401) {
-      localStorage.removeItem('app_password');
+      const el = document.getElementById('password');
+      if (el) el.value = '';
+      try { localStorage.removeItem('chat_password'); } catch (e) {}
       throw new Error('Password salah. Tekan 🎤 dan coba lagi untuk memasukkan ulang.');
     }
     const jawaban = String(data.text || '');
     if (!res.ok || !jawaban) throw new Error(jawaban || 'Server error ' + res.status);
 
-    simpanRiwayat('user', teks);
-    simpanRiwayat('model', jawaban);
+    simpanPesan('user', teks);
+    simpanPesan('ai', jawaban);
     return jawaban;
   }
 
@@ -368,8 +395,14 @@
   });
 
   $('vx-hapus').addEventListener('click', () => {
-    S.riwayat = [];
-    simpanLS('vx_riwayat', S.riwayat);
+    const j = jembatan();
+    if (j) {
+      if (!confirm('Hapus semua riwayat chat, termasuk di halaman utama?')) return;
+      j.clear();
+    } else {
+      S.riwayat = [];
+      simpanLS('vx_riwayat', S.riwayat);
+    }
     logEl.innerHTML = '';
   });
 
@@ -429,6 +462,7 @@
   fab.addEventListener('click', () => {
     if (geser) { geser = false; return; }   // habis digeser, jangan buka panel
     panel.classList.add('open');
+    tampilkanRiwayat();
     setState('idle');
     if (!rafId) loop();
   });
