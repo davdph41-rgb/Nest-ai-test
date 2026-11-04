@@ -4,6 +4,9 @@ const statusEl = document.getElementById('status');
 const kamuEl = document.getElementById('kamu');
 const aiEl = document.getElementById('ai');
 
+// Riwayat percakapan suara (dikirim ke api/chat.js supaya AI ingat obrolan)
+const riwayat = [];
+
 if (!mic) {
   console.error('Tombol dengan id="mic" tidak ditemukan di index.html');
 } else if (!SR) {
@@ -62,27 +65,34 @@ async function tanyaAI(teks) {
     localStorage.setItem('app_password', password);
   }
 
+  // Petunjuk gaya jawab untuk mode suara (hanya dikirim, tidak disimpan di riwayat)
+  const petunjuk =
+    '[Jawab dalam 1-3 kalimat, bahasa Indonesia santai, tanpa format markdown.] ';
+
   const res = await fetch('/api/chat', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-password': password,
-    },
-    body: JSON.stringify({ message: teks, password: password }),
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      password: password,
+      messages: [...riwayat, { role: 'user', text: petunjuk + teks }],
+    }),
   });
 
   const data = await res.json();
   console.log('Balasan server:', res.status, data);
 
-  const jawaban =
-    data.reply || data.text || data.response || data.answer ||
-    data.message || data.error || JSON.stringify(data);
+  const jawaban = String(data.text || data.error || JSON.stringify(data));
 
-  if (String(jawaban).toLowerCase().includes('password salah')) {
+  if (res.status === 401) {
     localStorage.removeItem('app_password'); // supaya ditanya ulang
+    return jawaban;
   }
 
-  return String(jawaban);
+  // Simpan ke riwayat hanya kalau berhasil
+  riwayat.push({ role: 'user', text: teks });
+  riwayat.push({ role: 'model', text: jawaban });
+
+  return jawaban;
 }
 
 function bicara(teks) {
