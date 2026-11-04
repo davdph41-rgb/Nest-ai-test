@@ -103,3 +103,18 @@ async function send() {
 
 sendBtn.onclick = send;
 input.onkeydown = (e) => e.key === "Enter" && send();
+
+// Jembatan untuk voice.js: percakapan suara masuk ke riwayat chat yang sama
+window.chatBridge = {
+  getMessages: () => messages,
+  addMessage(role, text) {
+    messages.push({ role, text });
+    add(role, text);
+    saveMessages();
+  },
+  clear() {
+    messages = [];
+    chat.innerHTML = "";
+    saveMessages();
+  },
+};
