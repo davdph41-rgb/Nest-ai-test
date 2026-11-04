@@ -28,7 +28,9 @@
   const css = `
   :root{--vx-bg:#ffffff;--vx-fg:#111827;--vx-card:#f3f4f6;--vx-line:#e5e7eb;--vx-acc:#4f46e5}
   @media (prefers-color-scheme:dark){:root{--vx-bg:#0f172a;--vx-fg:#e5e7eb;--vx-card:#1e293b;--vx-line:#334155}}
-  .vx-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;font-size:26px;cursor:pointer;background:var(--vx-acc);color:#fff;box-shadow:0 4px 14px rgba(0,0,0,.35);z-index:99998}
+  .vx-fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));width:56px;height:56px;border-radius:50%;border:0;font-size:26px;cursor:grab;background:var(--vx-acc);color:#fff;box-shadow:0 6px 18px rgba(0,0,0,.4);z-index:99998;touch-action:none;user-select:none;-webkit-user-select:none;-webkit-tap-highlight-color:transparent;animation:vx-float 3s ease-in-out infinite}
+  .vx-fab.vx-drag{animation:none;cursor:grabbing;transform:scale(1.15);box-shadow:0 10px 26px rgba(0,0,0,.5)}
+  @keyframes vx-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
   .vx-panel{position:fixed;inset:0;z-index:99999;display:none;flex-direction:column;background:var(--vx-bg);color:var(--vx-fg);font-family:system-ui,-apple-system,sans-serif;padding:env(safe-area-inset-top,0px) 14px calc(10px + env(safe-area-inset-bottom,0px));box-sizing:border-box}
   .vx-panel.open{display:flex}
   .vx-panel *{box-sizing:border-box}
@@ -371,7 +373,61 @@
     logEl.innerHTML = '';
   });
 
+  /* ---------- Tombol mengambang yang bisa digeser ---------- */
+  const MARGIN = 8;
+  const ukuran = () => fab.offsetWidth || 56;
+
+  function taruhFab(x, y) {
+    const maxX = window.innerWidth - ukuran() - MARGIN;
+    const maxY = window.innerHeight - ukuran() - MARGIN;
+    const px = Math.min(Math.max(MARGIN, x), Math.max(MARGIN, maxX));
+    const py = Math.min(Math.max(MARGIN, y), Math.max(MARGIN, maxY));
+    fab.style.left = px + 'px';
+    fab.style.top = py + 'px';
+    fab.style.right = 'auto';
+    fab.style.bottom = 'auto';
+    return { x: px, y: py };
+  }
+
+  const posisiSimpan = bacaLS('vx_fab', null);
+  if (posisiSimpan) taruhFab(posisiSimpan.x, posisiSimpan.y);
+
+  window.addEventListener('resize', () => {
+    if (fab.style.left) taruhFab(parseFloat(fab.style.left), parseFloat(fab.style.top));
+  });
+
+  let drag = null;
+  let geser = false;
+
+  fab.addEventListener('pointerdown', (e) => {
+    const r = fab.getBoundingClientRect();
+    drag = { dx: e.clientX - r.left, dy: e.clientY - r.top, sx: e.clientX, sy: e.clientY };
+    geser = false;
+    try { fab.setPointerCapture(e.pointerId); } catch (err) {}
+  });
+
+  fab.addEventListener('pointermove', (e) => {
+    if (!drag) return;
+    if (!geser && Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return; // anggap klik biasa
+    geser = true;
+    fab.classList.add('vx-drag');
+    taruhFab(e.clientX - drag.dx, e.clientY - drag.dy);
+  });
+
+  const lepas = () => {
+    if (!drag) return;
+    drag = null;
+    fab.classList.remove('vx-drag');
+    if (geser) {
+      const r = fab.getBoundingClientRect();
+      simpanLS('vx_fab', { x: r.left, y: r.top });
+    }
+  };
+  fab.addEventListener('pointerup', lepas);
+  fab.addEventListener('pointercancel', lepas);
+
   fab.addEventListener('click', () => {
+    if (geser) { geser = false; return; }   // habis digeser, jangan buka panel
     panel.classList.add('open');
     setState('idle');
     if (!rafId) loop();
