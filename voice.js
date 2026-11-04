@@ -13,7 +13,7 @@ if (!SR) {
   rec.interimResults = false;
 
   mic.onclick = () => {
-    speechSynthesis.cancel();      // hentikan suara AI kalau masih bicara
+    speechSynthesis.cancel(); // hentikan suara AI kalau masih bicara
     rec.start();
     statusEl.textContent = '🎧 Mendengarkan...';
   };
@@ -44,12 +44,25 @@ async function tanyaAI(teks) {
       // tambahkan juga password/header kalau chat.js-mu memintanya
     }),
   });
+
   const data = await res.json();
-  return data.reply;
+  console.log('Balasan server:', res.status, data);
+
+  // Coba beberapa nama field yang umum dipakai.
+  // Kalau tidak ada yang cocok, tampilkan isi mentah supaya nama field aslinya kelihatan.
+  const jawaban =
+    data.reply ||
+    data.text ||
+    data.response ||
+    data.answer ||
+    data.message ||
+    JSON.stringify(data);
+
+  return String(jawaban);
 }
 
 function bicara(teks) {
-  const bersih = teks.replace(/[*#`_>-]/g, ''); // buang simbol markdown
+  const bersih = String(teks).replace(/[*#`_>-]/g, ''); // buang simbol markdown
   const u = new SpeechSynthesisUtterance(bersih);
   u.lang = 'id-ID';
   u.rate = 1;
