@@ -1,71 +1,28 @@
-const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const mic = document.getElementById('mic');
-const statusEl = document.getElementById('status');
-const kamuEl = document.getElementById('kamu');
-const aiEl = document.getElementById('ai');
-
-if (!SR) {
-  statusEl.textContent = 'Browser tidak mendukung suara. Pakai Chrome.';
-  mic.disabled = true;
-} else {
-  const rec = new SR();
-  rec.lang = 'id-ID';
-  rec.interimResults = false;
-
-  mic.onclick = () => {
-    speechSynthesis.cancel(); // hentikan suara AI kalau masih bicara
-    rec.start();
-    statusEl.textContent = '🎧 Mendengarkan...';
-  };
-
-  rec.onresult = async (e) => {
-    const teks = e.results[0][0].transcript;
-    kamuEl.textContent = 'Kamu: ' + teks;
-    statusEl.textContent = '🤔 Berpikir...';
-    try {
-      const jawaban = await tanyaAI(teks);
-      aiEl.textContent = 'AI: ' + jawaban;
-      statusEl.textContent = '🔊 Berbicara...';
-      bicara(jawaban);
-    } catch (err) {
-      statusEl.textContent = 'Gagal: ' + err.message;
-    }
-  };
-
-  rec.onerror = (e) => (statusEl.textContent = 'Error mic: ' + e.error);
-}
-
 async function tanyaAI(teks) {
+  let password = localStorage.getItem('app_password');
+  if (!password) {
+    password = prompt('Masukkan password:');
+    localStorage.setItem('app_password', password);
+  }
+
   const res = await fetch('/api/chat', {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      message: teks,
-      // tambahkan juga password/header kalau chat.js-mu memintanya
-    }),
+    headers: {
+      'Content-Type': 'application/json',
+      'x-password': password,
+    },
+    body: JSON.stringify({ message: teks, password: password }),
   });
 
   const data = await res.json();
   console.log('Balasan server:', res.status, data);
 
-  // Coba beberapa nama field yang umum dipakai.
-  // Kalau tidak ada yang cocok, tampilkan isi mentah supaya nama field aslinya kelihatan.
-  const jawaban =
-    data.reply ||
-    data.text ||
-    data.response ||
-    data.answer ||
-    data.message ||
-    JSON.stringify(data);
+  if (data.error === 'Password salah' || data.reply === 'Password salah') {
+    localStorage.removeItem('app_password'); // supaya ditanya ulang
+  }
 
-  return String(jawaban);
-}
-
-function bicara(teks) {
-  const bersih = String(teks).replace(/[*#`_>-]/g, ''); // buang simbol markdown
-  const u = new SpeechSynthesisUtterance(bersih);
-  u.lang = 'id-ID';
-  u.rate = 1;
-  u.onend = () => (statusEl.textContent = 'Tekan 🎤 untuk bicara lagi');
-  speechSynthesis.speak(u);
+  return String(
+    data.reply || data.text || data.response || data.answer || data.message ||
+    data.error || JSON.stringify(data)
+  );
 }
