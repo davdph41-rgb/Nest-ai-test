@@ -1,6 +1,22 @@
-const MODEL = "gemini-3.5-flash-lite";
-const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}`;
-const MAX_IMAGE_BASE64 = 4000000; // batas aman (body Vercel maks ~4,5 MB)
+const PRIMARY_MODEL   = "gemini-3.5-flash";
+const FALLBACK_MODEL  = "gemini-3.5-flash-lite";
+const RETRIABLE_STATUS = new Set([429, 500, 502, 503, 504]); // layak dicoba ulang
+const MAX_IMAGE_BASE64 = 4000000;
+
+function buildUrl(model, stream, key) {
+  const base = `https://generativelanguage.googleapis.com/v1beta/models/${model}`;
+  return stream
+    ? `${base}:streamGenerateContent?alt=sse&key=${key}`
+    : `${base}:generateContent?key=${key}`;
+}
+
+async function callModel(model, payload, stream, key) {
+  return fetch(buildUrl(model, stream, key), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+}
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") return res.status(405).end();
@@ -32,46 +48,87 @@ module.exports = async (req, res) => {
   }
 
   const key = process.env.GEMINI_API_KEY;
-  const url = stream
-    ? `${BASE}:streamGenerateContent?alt=sse&key=${key}`
-    : `${BASE}:generateContent?key=${key}`;
+  const payload = { contents };
+  const models = [PRIMARY_MODEL, FALLBACK_MODEL];
 
-  let upstream;
-  try {
-    upstream = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ contents }),
-    });
-  } catch (e) {
-    return res.status(500).json({ text: "Server error: " + e.message });
-  }
-
-  // ---------- Mode biasa (dipakai asisten suara): balasan JSON utuh ----------
+  // =================== MODE BIASA (JSON utuh) ===================
   if (!stream) {
-    try {
-      const data = await upstream.json();
-      const text = data?.candidates?.[0]?.content?.parts
-        ?.map((p) => p.text || "")
-        .join("");
-      if (!upstream.ok || !text) {
-        return res.status(502).json({ text: data?.error?.message || "Tidak ada jawaban" });
+    let lastErrMsg = "Tidak ada jawaban";
+
+    for (let i = 0; i < models.length; i++) {
+      const m = models[i];
+      let upstream;
+      try {
+        upstream = await callModel(m, payload, false, key);
+      } catch (e) {
+        lastErrMsg = "Server error: " + e.message;
+        continue; // error jaringan → coba model berikutnya
       }
-      return res.json({ text });
-    } catch (e) {
-      return res.status(500).json({ text: "Server error: " + e.message });
+
+      try {
+        const data = await upstream.json();
+        const text = data?.candidates?.[0]?.content?.parts
+          ?.map((p) => p.text || "")
+          .join("");
+
+        if (upstream.ok && text) {
+          if (m === FALLBACK_MODEL) console.warn(`[fallback] ${PRIMARY_MODEL} gagal, dipakai ${FALLBACK_MODEL}`);
+          res.setHeader("X-Model-Used", m);
+          return res.json({ text });
+        }
+
+        lastErrMsg = data?.error?.message || "Tidak ada jawaban";
+
+        // Kalau error tidak bisa diulang (misal 400) → jangan lanjut ke fallback
+        if (!RETRIABLE_STATUS.has(upstream.status)) break;
+      } catch (e) {
+        lastErrMsg = "Server error: " + e.message;
+      }
     }
+
+    return res.status(502).json({ text: lastErrMsg });
   }
 
-  // ---------- Mode streaming: teruskan potongan teks begitu datang ----------
-  if (!upstream.ok) {
-    let pesan = "Terjadi kesalahan pada AI";
+  // =================== MODE STREAMING ===================
+  // Cari upstream yang sehat dulu SEBELUM mulai mengirim ke klien.
+  // Kalau primary gagal di fase ini, masih aman untuk coba fallback.
+  let upstream = null;
+  let usedModel = null;
+  let lastErrMsg = "Terjadi kesalahan pada AI";
+
+  for (let i = 0; i < models.length; i++) {
+    const m = models[i];
+    let up;
     try {
-      const d = await upstream.json();
-      pesan = d?.error?.message || pesan;
-    } catch (e) {}
-    return res.status(502).json({ text: pesan });
+      up = await callModel(m, payload, true, key);
+    } catch (e) {
+      lastErrMsg = "Server error: " + e.message;
+      if (i === models.length - 1) return res.status(500).json({ text: lastErrMsg });
+      continue;
+    }
+
+    if (!up.ok) {
+      let pesan = "Terjadi kesalahan pada AI";
+      try {
+        const d = await up.json();
+        pesan = d?.error?.message || pesan;
+      } catch (e) {}
+      lastErrMsg = pesan;
+
+      // Hanya coba fallback kalau statusnya retriable
+      if (RETRIABLE_STATUS.has(up.status) && i < models.length - 1) {
+        console.warn(`[fallback] ${m} gagal (${up.status}), coba model berikutnya…`);
+        continue;
+      }
+      return res.status(502).json({ text: pesan });
+    }
+
+    upstream = up;
+    usedModel = m;
+    break;
   }
+
+  if (!upstream) return res.status(502).json({ text: lastErrMsg });
 
   let mulai = false;
   const kirim = (teks) => {
@@ -80,6 +137,7 @@ module.exports = async (req, res) => {
         "Content-Type": "text/plain; charset=utf-8",
         "Cache-Control": "no-cache, no-transform",
         "X-Accel-Buffering": "no",
+        "X-Model-Used": usedModel,
       });
       mulai = true;
     }
@@ -109,9 +167,7 @@ module.exports = async (req, res) => {
             .map((p) => p.text || "")
             .join("");
           if (t) kirim(t);
-        } catch (e) {
-          /* abaikan potongan yang bukan JSON utuh */
-        }
+        } catch (e) { /* abaikan potongan yang bukan JSON utuh */ }
       }
     }
   } catch (e) {
