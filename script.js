@@ -102,7 +102,9 @@ async function send() {
 }
 
 sendBtn.onclick = send;
-input.onkeydown = (e) => e.key === "Enter" && send();
+input.onkeydown = (e) => {
+  if (e.key === "Enter") send();
+};
 
 // Jembatan untuk voice.js: percakapan suara masuk ke riwayat chat yang sama
 window.chatBridge = {
