@@ -1,122 +1,125 @@
-// api/chat.js
-export const config = { runtime: 'edge' };
-export const maxDuration = 60;
+const MODEL = "gemini-3.5-flash-lite";
+const BASE = `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}`;
+const MAX_IMAGE_BASE64 = 4000000; // batas aman (body Vercel maks ~4,5 MB)
 
-export default async function handler(req) {
-  if (req.method !== 'POST') {
-    return new Response(JSON.stringify({ error: 'Method not allowed' }), { 
-      status: 405, headers: { 'Content-Type': 'application/json' } 
-    });
+module.exports = async (req, res) => {
+  if (req.method !== "POST") return res.status(405).end();
+
+  const { messages, password, stream, image } = req.body || {};
+  if (password !== process.env.APP_PASSWORD) {
+    return res.status(401).json({ text: "Password salah" });
   }
+
+  const contents = (messages || []).map((m) => ({
+    role: m.role === "user" ? "user" : "model",
+    parts: [{ text: m.text }],
+  }));
+
+  // Gambar (opsional) ditempelkan ke pesan user yang terakhir
+  if (image) {
+    const okTipe = typeof image.mimeType === "string" && image.mimeType.startsWith("image/");
+    const okData = typeof image.data === "string" && image.data.length > 0;
+    if (!okTipe || !okData) {
+      return res.status(400).json({ text: "Format gambar tidak valid" });
+    }
+    if (image.data.length > MAX_IMAGE_BASE64) {
+      return res.status(413).json({ text: "Gambar terlalu besar" });
+    }
+    const last = contents[contents.length - 1];
+    if (last && last.role === "user") {
+      last.parts.unshift({ inlineData: { mimeType: image.mimeType, data: image.data } });
+    }
+  }
+
+  const key = process.env.GEMINI_API_KEY;
+  const url = stream
+    ? `${BASE}:streamGenerateContent?alt=sse&key=${key}`
+    : `${BASE}:generateContent?key=${key}`;
+
+  let upstream;
+  try {
+    upstream = await fetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ contents }),
+    });
+  } catch (e) {
+    return res.status(500).json({ text: "Server error: " + e.message });
+  }
+
+  // ---------- Mode biasa (dipakai asisten suara): balasan JSON utuh ----------
+  if (!stream) {
+    try {
+      const data = await upstream.json();
+      const text = data?.candidates?.[0]?.content?.parts
+        ?.map((p) => p.text || "")
+        .join("");
+      if (!upstream.ok || !text) {
+        return res.status(502).json({ text: data?.error?.message || "Tidak ada jawaban" });
+      }
+      return res.json({ text });
+    } catch (e) {
+      return res.status(500).json({ text: "Server error: " + e.message });
+    }
+  }
+
+  // ---------- Mode streaming: teruskan potongan teks begitu datang ----------
+  if (!upstream.ok) {
+    let pesan = "Terjadi kesalahan pada AI";
+    try {
+      const d = await upstream.json();
+      pesan = d?.error?.message || pesan;
+    } catch (e) {}
+    return res.status(502).json({ text: pesan });
+  }
+
+  let mulai = false;
+  const kirim = (teks) => {
+    if (!mulai) {
+      res.writeHead(200, {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Cache-Control": "no-cache, no-transform",
+        "X-Accel-Buffering": "no",
+      });
+      mulai = true;
+    }
+    res.write(teks);
+  };
 
   try {
-    const body = await req.json();
-    let messages = body?.messages;
+    const reader = upstream.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
 
-    if (!messages || !Array.isArray(messages)) {
-      return new Response(JSON.stringify({ error: 'Format messages salah' }), { 
-        status: 400, headers: { 'Content-Type': 'application/json' } 
-      });
-    }
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
 
-    const lastMessageObj = messages[messages.length - 1];
-    let lastText = "";
-    
-    if (typeof lastMessageObj.content === 'string') {
-      lastText = lastMessageObj.content.toLowerCase();
-    } else if (Array.isArray(lastMessageObj.content)) {
-      const textPart = lastMessageObj.content.find(c => c.type === 'text');
-      if (textPart && textPart.text) lastText = textPart.text.toLowerCase();
-    }
-
-    let forcedProvider = null;
-    if (lastText.includes('!openai')) forcedProvider = 'OpenAI';
-    else if (lastText.includes('!groq')) forcedProvider = 'Groq';
-    else if (lastText.includes('!gemini')) forcedProvider = 'Gemini';
-
-    const hasImage = Array.isArray(lastMessageObj.content) && 
-                     lastMessageObj.content.some(item => item.type === 'image_url');
-
-    const systemMessage = {
-      role: 'system',
-      content: `Anda adalah asisten AI. ATURAN WAJIB: 1. Jika memberikan kode, SELALU bungkus dengan blok markdown tiga backtick. 2. JANGAN memotong kode.`
-    };
-
-    const messagesWithSystem = [systemMessage, ...messages];
-
-    const allProviders = [
-      { name: 'OpenAI', endpoint: 'https://api.openai.com/v1/chat/completions', apiKey: process.env.OPENAI_API_KEY, model: 'gpt-4o-mini' },
-      { name: 'Groq', endpoint: 'https://api.groq.com/openai/v1/chat/completions', apiKey: process.env.GROQ_API_KEY, model: 'openai/gpt-oss-120b' },
-      { name: 'Gemini Pro', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', apiKey: process.env.GEMINI_API_KEY, model: 'gemini-3.5-flash' },
-      { name: 'Gemini Lite', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai/chat/completions', apiKey: process.env.GEMINI_API_KEY, model: 'gemini-3.5-flash-lite' }
-    ];
-
-    let activeProviders = [...allProviders];
-
-    if (forcedProvider) {
-      if (forcedProvider === 'Gemini') {
-        activeProviders = activeProviders.filter(p => p.name.includes('Gemini'));
-      } else {
-        activeProviders = activeProviders.filter(p => p.name === forcedProvider);
-      }
-    }
-
-    if (hasImage) {
-      activeProviders = activeProviders.filter(p => p.name !== 'Groq');
-      if (!forcedProvider) {
-        activeProviders.sort((a, b) => (b.name.includes('Gemini') ? 1 : -1));
-      }
-    }
-
-    for (const provider of activeProviders) {
-      if (!provider.apiKey) continue;
-
-      try {
-        console.log(`[Mencoba] ${provider.name} (${provider.model})...`);
-        
-        const response = await fetch(provider.endpoint, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${provider.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: provider.model,
-            messages: messagesWithSystem,
-            stream: true,
-            temperature: 0.3
-          }),
-        });
-
-        if (response.ok) {
-          console.log(`[Sukses] ${provider.name} menjawab.`);
-          
-          // SUNTIKKAN HEADER X-AI-PROVIDER DI SINI
-          return new Response(response.body, {
-            headers: {
-              'Content-Type': 'text/event-stream; charset=utf-8',
-              'Cache-Control': 'no-cache, no-transform',
-              'Connection': 'keep-alive',
-              'X-AI-Provider': provider.name // <-- NAMA AI DIKIRIM KE FRONTEND
-            },
-          });
+      let i;
+      while ((i = buf.indexOf("\n")) >= 0) {
+        const line = buf.slice(0, i).trim();
+        buf = buf.slice(i + 1);
+        if (!line.startsWith("data:")) continue;
+        const json = line.slice(5).trim();
+        if (!json || json === "[DONE]") continue;
+        try {
+          const d = JSON.parse(json);
+          const t = (d?.candidates?.[0]?.content?.parts || [])
+            .map((p) => p.text || "")
+            .join("");
+          if (t) kirim(t);
+        } catch (e) {
+          /* abaikan potongan yang bukan JSON utuh */
         }
-        
-        const errorText = await response.text().catch(() => "Unknown error");
-        console.error(`[Gagal] ${provider.name} Error: ${response.status} - ${errorText.substring(0, 100)}`);
-        
-      } catch (error) {
-        console.error(`[Error Jaringan] ${provider.name}:`, error.message);
       }
     }
-
-    return new Response(JSON.stringify({ error: `⚠️ Semua model AI sedang sibuk.` }), { 
-      status: 503, headers: { 'Content-Type': 'application/json' } 
-    });
-
-  } catch (error) {
-    return new Response(JSON.stringify({ error: error.message }), { 
-      status: 500, headers: { 'Content-Type': 'application/json' } 
-    });
+  } catch (e) {
+    if (!mulai) return res.status(500).json({ text: "Server error: " + e.message });
+    res.write("\n\n[Koneksi terputus]");
+    return res.end();
   }
-}
+
+  if (!mulai) return res.status(502).json({ text: "Tidak ada jawaban" });
+  res.end();
+};
